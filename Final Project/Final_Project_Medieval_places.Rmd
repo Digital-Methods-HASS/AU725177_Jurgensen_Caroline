@@ -1,0 +1,227 @@
+---
+title: "Final_Project_Danish_Medieval_Places"
+author: Caroline Krog Jürgensen
+output: html_document
+date: "2023-10-24"
+runtime: shiny
+---
+These are the packages used for the project:
+```{r}
+library(leaflet)
+library(htmlwidgets)
+library(tidyverse)
+library(googlesheets4)
+library(leaflet)
+library(dplyr)
+gs4_deauth()
+```
+### Reading my data from Google Sheets
+I gathered my data and tidied it up in a Google spreadsheet
+```{r message=FALSE, warning=FALSE}
+Medieval_places <- read_sheet("https://docs.google.com/spreadsheets/d/12_irlCz67atKu1ul-hR1u6J-2JBkK4uyTJIY-m20VD8/edit#gid=0", col_types ="ccccccccccncncncnccccc",range = "data")
+glimpse(Medieval_places)
+```
+I glimpse my data to check it was read correctly
+
+### Changing the relevant columnvalues from characters to numeric values
+```{r warning=FALSE}
+Medieval_places$Longitude <- as.numeric(Medieval_places$Longitude)
+class(Medieval_places$Longitude)
+Medieval_places$Latitude <- as.numeric(Medieval_places$Latitude)
+class(Medieval_places$Latitude)
+
+```
+
+
+### Basemap: Creating a map with leaflet
+```{r}
+center_dan <- leaflet() %>% 
+  setView(10.2083063,56.1568947, zoom=7)
+esri <- grep("^Esri", providers, value = TRUE)  
+
+for (provider in esri) {
+  center_dan <- center_dan %>% addProviderTiles(provider, group = provider)
+}
+
+MedDanMap <-center_dan %>%
+  addLayersControl(baseGroups = names(esri),
+                   options = layersControlOptions(collapsed = FALSE)) %>%
+  addMiniMap(tiles = esri[[1]], toggleDisplay = TRUE,
+             position = "bottomright") %>%
+  addMeasure(
+    position = "bottomleft",
+    primaryLengthUnit = "meters",
+    primaryAreaUnit = "sqmeters",
+    activeColor = "#3D535D",
+    completedColor = "#7D4479") %>% 
+  htmlwidgets::onRender("
+                        function(el, x) {
+                        var myMap = this;
+                        myMap.on('baselayerchange',
+                        function (e) {
+                        myMap.minimap.changeLayer(L.tileLayer.provider(e.name));
+                        })
+                        }") %>% 
+  addControl("", position = "topright")
+MedDanMap
+
+```
+### Map 1: Adding markers to all the places from the Middle Ages based on the placenames and their ending characteristics.
+```{r warning=FALSE}
+leaflet() %>% 
+  addTiles() %>% 
+  addMarkers(lng = Medieval_places$Longitude, 
+             lat =Medieval_places$Latitude)
+```
+### Map 2: Adding the place names as a popup 
+```{r warning=FALSE}
+leaflet() %>% 
+  addTiles() %>% 
+  addMarkers(lng = Medieval_places$Longitude, 
+             lat =Medieval_places$Latitude,
+             popup = Medieval_places$Placenames)
+```
+
+### Map 3: Clustering the markers
+I cluster the markers to get a better overview of where the places are located, and to see if there is regions where the places from the Middle Ages are more frequent than in other regions.
+```{r message=FALSE, warning=FALSE}
+leaflet() %>% 
+  addTiles() %>% 
+  addMarkers(lng = Medieval_places$Longitude, 
+             lat =Medieval_places$Latitude,
+             popup = Medieval_places$Placenames,
+             clusterOptions = markerClusterOptions()) 
+
+```
+
+### Map 4: Adding further descriptions to my markers
+I add a description box to each marker containing the placename(Stednavn), the ending characteristic (Karakteristik) and the latitude (Breddegrad) and longitude (Længdegrad). I decided to write the boxes in danish, because it is a danish map.
+```{r warning=FALSE}
+leaflet() %>% 
+  addTiles() %>% 
+  addMarkers(
+    lng = Medieval_places$Longitude, 
+    lat = Medieval_places$Latitude,
+    popup = paste("Stednavn:", Medieval_places$Placenames, "<br>Karakteristik:", Medieval_places$Ending_Characteristics, "<br>Breddegrad:",Medieval_places$Latitude, "<br>Længddegrad:",Medieval_places$Longitude),
+    clusterOptions = markerClusterOptions()
+  )
+
+```
+
+
+### Map 5:Colorcoding the places based on their ending characteristic
+I color coded the places based on their ending characteristics in order to see where in Denmark the different ending characteristics are the most common. 
+```{r warning=FALSE}
+
+Medieval_places$Color <- case_when(
+  Medieval_places$Ending_Characteristics == "toft" ~ "red",
+  Medieval_places$Ending_Characteristics == "tofte" ~ "red",
+  Medieval_places$Ending_Characteristics=="tved"~"black",
+  Medieval_places$Ending_Characteristics == "rød" ~ "blue",
+  Medieval_places$Ending_Characteristics == "rod" ~ "blue",
+  Medieval_places$Ending_Characteristics == "rud" ~ "blue",
+  Medieval_places$Ending_Characteristics == "bøl" ~ "green",
+  Medieval_places$Ending_Characteristics == "bølle" ~ "green",
+  Medieval_places$Ending_Characteristics=="torp"~"purple",
+  Medieval_places$Ending_Characteristics=="trup"~"purple",
+  Medieval_places$Ending_Characteristics=="drup"~"purple"  
+)
+
+MedDanMapColors <- leaflet() %>%
+  addTiles() %>%
+  addCircleMarkers(
+    data = Medieval_places,
+    lng = Medieval_places$Longitude, 
+    lat = Medieval_places$Latitude,
+    color = ~Color,
+    radius=0.5,
+    popup = paste("Stednavn:", Medieval_places$Placenames, "<br>Karakteristik:", Medieval_places$Ending_Characteristics, "<br>Breddegrad:", Medieval_places$Latitude, "<br>Længdegrad:", Medieval_places$Longitude))
+
+
+
+MedDanMapColors
+
+```
+Unfortunately this was more confusing than useful. Looking at the colorcoded map it is easy to see that torp, trup or drup is the most common ending characteristic of from the Middle Age, but it is extremely hard to separate the markers from each other and get a meaningful overview of the map and the ending characteristic. Therefore this code is not appropriate for my vision. 
+
+### Creating a shiny app 
+I therefore decided to create a map, where it is possiple to choose only to see the places with a specific ending characteristic. I made the map by creating a shiny-app, which creates an html, where it is possible to choose a specific ending characteristic in the top left corner, which results in the map filtering the data based on the chosen ending characteristic and thereby only showing the places with the matching ending characteristic. This gives a better impression of the patterns between the ending characteristic of the places from the Middle Ages, and see if there is any ending characteristic belonging to a specific part of Denmark.
+```{r message=FALSE}
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+
+install.packages("shiny")
+```
+Here I needed to download the shiny package
+```{r warning=FALSE}
+library(shiny)
+library(leaflet)
+
+shiny_map <- fluidPage(
+  selectInput("ending_characteristic", "Vælg Karakteristik:", 
+              choices = unique(Medieval_places$Ending_Characteristics)),
+  leafletOutput("map")
+)
+
+server <- function(input, output, session) {
+  output$map <- renderLeaflet({
+    filtered_data <- subset(Medieval_places, Ending_Characteristics == input$ending_characteristic)
+    
+    leaflet() %>% 
+      addTiles() %>% 
+      addMarkers(
+        data = filtered_data,
+        lng = ~Longitude, 
+        lat = ~Latitude,
+        popup = ~paste("Stednavn:", Placenames, "<br>Karakteristik:", Ending_Characteristics, "<br>Breddegrad:",Latitude, "<br>Længdegrad:",Longitude),
+        clusterOptions = markerClusterOptions()
+      )
+  })
+}
+
+shinyApp(shiny_map, server)
+```
+Unfortunately two options which are not ending characteristics from the Middle Ages appear when clicking on the bar, where to choose which ending charateristics you would like to see on the map. I was not able to figure out how to remove the options named "NA" and "Ending_Characteristics", and therefore they still appear as options. Fortunately they do not affect the results of the other options, and therefore the map is still fulfilling its purpose. 
+
+### Final Map: Extended shiny app
+In the map above there is not an option to see all the places at once, and therefore I added this option in the map below by creating an option named "Alle"
+```{r message=FALSE, warning=FALSE}
+install.packages("htmltools")
+library(htmltools)
+
+shiny_map <- fluidPage(
+  selectInput("ending_characteristic", "Vælg Karateristik:", 
+              c("Alle", unique(Medieval_places$Ending_Characteristics))),
+  leafletOutput("map")
+)
+server <- function(input, output, session) {
+  output$map <- renderLeaflet({
+    if (input$ending_characteristic == "Alle") {
+      filtered_data <- Medieval_places
+    } else {
+      filtered_data <- subset(Medieval_places, Ending_Characteristics == input$ending_characteristic)
+    }
+    
+    leaflet() %>% 
+      addTiles() %>% 
+      addMarkers(
+        data = filtered_data,
+        lng = ~Longitude, 
+        lat = ~Latitude,
+        popup = ~paste("Stednavn:", Placenames, "<br>Karakteristik:", Ending_Characteristics, "<br>Breddegrad:",Latitude,"<br>Længdegrad:",Longitude),
+        clusterOptions = markerClusterOptions()
+      )
+  })
+}
+
+shinyApp(shiny_map, server)
+
+```
+
+
+The final map created in shiny app is a full interactive map in the form of a html, where it is possible to review all the places from the danish middle ages collected in the dataset and to see where they are located. Furthermore, it is possible to choose which group of places defines od their ending characteristic and thereby start to analyse their location, frequency and whether they are clustering in specific parts of Denmark. At the same time it is possible to see details and information such as place name("Stednavn"), Ending characteristic("Karakteristik") and coordinates("Breddegrad"/"Længdegrad") for each place. 
+
+
+
+
+
+
